@@ -116,6 +116,53 @@ interface OwnedToken {
 // Landing page (not connected)
 // ---------------------------------------------------------------------------
 
+const FAQ_ITEMS: { q: string; a: string }[] = [
+  {
+    q: "Is this an exploit?",
+    a: "Not in the \u201csteal funds / take assets\u201d sense. It uses owner permissions already available on-chain. Think \u201cunexpected capability + better tooling,\u201d not contract takeover.",
+  },
+  {
+    q: "Can someone change my NFT without permission?",
+    a: "No. Only the current token owner can set artwork for that token.",
+  },
+  {
+    q: "Can you rug or lock tokens?",
+    a: "No token custody in Forge. You sign transactions from your own wallet.",
+  },
+  {
+    q: "Why didn\u2019t the core team build this?",
+    a: "No idea \u2014 this is just an independent experiment from a holder/dev perspective.",
+  },
+  {
+    q: "This breaks rarity.",
+    a: "It changes how people think about rarity: from static traits to evolving provenance + design history.",
+  },
+  {
+    q: "Not official = sketchy.",
+    a: "Fair take. That\u2019s why it\u2019s clearly labeled unofficial, with on-chain transparency and owner-only writes.",
+  },
+  {
+    q: "What about malicious inputs?",
+    a: "Params are encoded and submitted on-chain via standard wallet signing. Still: always verify tx details before confirming.",
+  },
+];
+
+function FAQ() {
+  return (
+    <section className="faq">
+      <h3 className="faq-heading">FAQ</h3>
+      <div className="faq-list">
+        {FAQ_ITEMS.map((item) => (
+          <details key={item.q} className="faq-item">
+            <summary>{item.q}</summary>
+            <p>{item.a}</p>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Landing() {
   return (
     <div className="landing">
@@ -167,6 +214,7 @@ function Landing() {
           </a>
         </div>
       </div>
+      <FAQ />
     </div>
   );
 }
