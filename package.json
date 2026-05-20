@@ -1,0 +1,17 @@
+{
+  "name": "heraldia-artgen",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "fetch": "node generate.mjs fetch",
+    "preview": "node generate.mjs preview",
+    "random": "node generate.mjs random",
+    "probe": "node generate.mjs probe",
+    "analyze": "node generate.mjs analyze",
+    "craft": "node generate.mjs craft"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "viem": "^2.31.0"
+  }
+}
