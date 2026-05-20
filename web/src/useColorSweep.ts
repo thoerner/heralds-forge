@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   keccak256,
   concat,
@@ -53,7 +53,8 @@ function buildSweepHash(
   ]);
   for (let i = 0; i < 32; i++) {
     if (!usedBytes.has(i)) {
-      bytes[i] = ((r >>> (i % 24)) ^ (i * 37) ^ (baseRand >>> (i % 16))) & 0xff;
+      bytes[i] =
+        ((r >>> (i % 24)) ^ (i * 37) ^ (baseRand >>> (i % 16))) & 0xff;
     }
   }
   bytes[TRAIT_MAP.Theme.byte] = traits.Theme;
@@ -68,17 +69,6 @@ function buildSweepHash(
 const SWEEP_BYTES = [3, 4, 5, 6, 7];
 const CONCURRENCY = 10;
 
-export interface SweepState {
-  /** Set of accent colors reachable with current traits */
-  available: Set<string>;
-  /** Map of color → hash that produces it */
-  colorToHash: Map<string, `0x${string}`>;
-  /** true while sweep is running */
-  sweeping: boolean;
-  /** progress 0–1 */
-  progress: number;
-}
-
 export function useColorSweep(
   tokenId: bigint,
   ownerAddress: `0x${string}`,
@@ -91,13 +81,21 @@ export function useColorSweep(
   );
   const [sweeping, setSweeping] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [hasRun, setHasRun] = useState(false);
   const abortRef = useRef(0);
-  const [sweepKey, setSweepKey] = useState(0);
 
-  const resweep = useCallback(() => setSweepKey((k) => k + 1), []);
-
+  // Clear results when traits change
   useEffect(() => {
-    if (!publicClient) return;
+    abortRef.current++;
+    setSweeping(false);
+    setAvailable(new Set());
+    setColorToHash(new Map());
+    setProgress(0);
+    setHasRun(false);
+  }, [traits.Theme, traits.Pattern, traits.Background]);
+
+  const startSweep = useCallback(() => {
+    if (!publicClient || sweeping) return;
 
     const runId = ++abortRef.current;
     const total = SWEEP_BYTES.length * 256;
@@ -108,6 +106,7 @@ export function useColorSweep(
     setProgress(0);
     setAvailable(new Set());
     setColorToHash(new Map());
+    setHasRun(true);
 
     const { hashSlot, selectedBySlot } = artSelectionSlots(tokenId);
     const packedOwner = packSelectedBy(ownerAddress);
@@ -117,7 +116,8 @@ export function useColorSweep(
       args: [tokenId],
     });
 
-    const baseRand = Date.now() + sweepKey;
+    const baseRand = Date.now();
+    const currentTraits = { ...traits };
 
     async function probeHash(hash: `0x${string}`) {
       const result = await publicClient!.call({
@@ -160,7 +160,12 @@ export function useColorSweep(
 
           const batchSize = Math.min(CONCURRENCY, 256 - start);
           const promises = Array.from({ length: batchSize }, (_, i) => {
-            const hash = buildSweepHash(traits, bytePos, start + i, baseRand);
+            const hash = buildSweepHash(
+              currentTraits,
+              bytePos,
+              start + i,
+              baseRand,
+            );
             return probeHash(hash)
               .then((colors) => {
                 for (const c of colors) {
@@ -187,11 +192,7 @@ export function useColorSweep(
         setProgress(1);
       }
     })();
+  }, [publicClient, tokenId, ownerAddress, traits, sweeping]);
 
-    return () => {
-      abortRef.current++;
-    };
-  }, [publicClient, tokenId, ownerAddress, traits.Theme, traits.Pattern, traits.Background, sweepKey]);
-
-  return { available, colorToHash, sweeping, progress, resweep };
+  return { available, colorToHash, sweeping, progress, hasRun, startSweep };
 }

@@ -373,7 +373,8 @@ function Crafter({
     colorToHash: sweepColorToHash,
     sweeping,
     progress: sweepProgress,
-    resweep,
+    hasRun: sweepHasRun,
+    startSweep,
   } = useColorSweep(tokenId, ownerAddress, traits);
 
   const activeHash = overrideHash ?? colorHash ?? craftHash(traits, seed);
@@ -403,9 +404,7 @@ function Crafter({
       cancelColorSearch();
       return;
     }
-    const sweepDone = !sweeping && sweepColors.size > 0;
-    const dimmed = sweepDone && !sweepColors.has(color);
-    if (dimmed) return;
+    if (sweepHasRun && !sweeping && sweepColors.size > 0 && !sweepColors.has(color)) return;
 
     setTargetColor(color);
     setOverrideHash(null);
@@ -747,7 +746,7 @@ function Crafter({
                       {sweepColors.size} colors
                       <button
                         className="sweep-refresh"
-                        onClick={resweep}
+                        onClick={startSweep}
                         title="Rescan for different colors"
                         aria-label="Rescan colors"
                       >
@@ -756,22 +755,31 @@ function Crafter({
                     </span>
                   )}
                 </label>
-                <div className="color-swatches">
-                  {ACCENT_COLORS.map((c) => {
-                    const reachable = sweepColors.has(c);
-                    const dimmed = !sweeping && sweepColors.size > 0 && !reachable;
-                    return (
-                      <button
-                        key={c}
-                        className={`color-swatch${targetColor === c ? " selected" : ""}${dimmed ? " dimmed" : ""}`}
-                        style={{ background: c }}
-                        onClick={() => handleColorPick(c)}
-                        title={`${c}${dimmed ? " (not found for these traits)" : ""}`}
-                        aria-label={`Pick color ${c}`}
-                      />
-                    );
-                  })}
-                </div>
+                {!sweepHasRun && !sweeping ? (
+                  <button
+                    className="btn-sweep"
+                    onClick={startSweep}
+                  >
+                    Scan Available Colors
+                  </button>
+                ) : (
+                  <div className="color-swatches">
+                    {ACCENT_COLORS.map((c) => {
+                      const reachable = sweepColors.has(c);
+                      const dimmed = !sweeping && sweepColors.size > 0 && !reachable;
+                      return (
+                        <button
+                          key={c}
+                          className={`color-swatch${targetColor === c ? " selected" : ""}${dimmed ? " dimmed" : ""}`}
+                          style={{ background: c }}
+                          onClick={() => handleColorPick(c)}
+                          title={`${c}${dimmed ? " (not found for these traits)" : ""}`}
+                          aria-label={`Pick color ${c}`}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
                 {colorSearching && (
                   <div className="color-search-status">
                     <span className="tx-spinner" />
