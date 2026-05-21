@@ -186,9 +186,60 @@ function FAQPage({ onBack }: { onBack: () => void }) {
   );
 }
 
+interface RecentForge {
+  tokenId: string;
+  svg: string;
+}
+
+const CREST_POSITIONS = [
+  { top: "8%", left: "5%" },
+  { top: "22%", right: "7%" },
+  { top: "55%", left: "3%" },
+  { top: "68%", right: "4%" },
+  { top: "38%", left: "8%" },
+  { top: "82%", right: "9%" },
+];
+
+function useRecentForges(): RecentForge[] {
+  const [forges, setForges] = useState<RecentForge[]>([]);
+
+  useEffect(() => {
+    fetch(import.meta.env.VITE_FORGE_API_URL as string)
+      .then((r) => r.json())
+      .then((data: RecentForge[]) => setForges(data.slice(0, 6)))
+      .catch(() => {});
+  }, []);
+
+  return forges;
+}
+
 function Landing({ onFaq }: { onFaq: () => void }) {
+  const recentForges = useRecentForges();
+
   return (
     <div className="landing">
+      {recentForges.length > 0 && (
+        <div className="floating-crests" aria-hidden="true">
+          {recentForges.map((forge, i) => {
+            const pos = CREST_POSITIONS[i % CREST_POSITIONS.length];
+            const delay = (parseInt(forge.tokenId, 10) % 7) * -3;
+            const size = 60 + (parseInt(forge.tokenId, 10) % 40);
+            return (
+              <div
+                key={forge.tokenId}
+                className="floating-crest"
+                style={{
+                  ...pos,
+                  width: size,
+                  height: size,
+                  animationDelay: `${delay}s`,
+                }}
+                dangerouslySetInnerHTML={{ __html: forge.svg }}
+              />
+            );
+          })}
+        </div>
+      )}
       <div className="landing-hero">
         <p className="eyebrow">Unofficial community tool</p>
         <h2>Herald&rsquo;s Forge</h2>
@@ -660,13 +711,23 @@ function Crafter({
       setTxMessage({ type: "success", text: "Custom art applied on-chain!" });
       fetchCurrentArt();
       refreshPastLooks();
+      if (previewResult?.svg) {
+        fetch(import.meta.env.VITE_FORGE_API_URL as string, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": import.meta.env.VITE_FORGE_API_KEY as string,
+          },
+          body: JSON.stringify({ tokenId: String(tokenId), hash: activeHash, svg: previewResult.svg }),
+        }).catch(() => {});
+      }
       const timer = setTimeout(() => {
         setTxMessage(null);
         resetSelectArt();
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [selectArtConfirmed, fetchCurrentArt, refreshPastLooks, resetSelectArt]);
+  }, [selectArtConfirmed, fetchCurrentArt, refreshPastLooks, resetSelectArt, tokenId, activeHash, previewResult]);
 
   useEffect(() => {
     if (resetArtConfirming) {
@@ -1050,13 +1111,9 @@ function App() {
     if (!address) setSelectedToken(null);
   }, [address]);
 
-  // DEV: ?addr= override for testing wallet patterns
-  const debugAddr = new URLSearchParams(window.location.search).get("addr") as `0x${string}` | null;
-  const patternAddr = debugAddr ?? address;
-
   useEffect(() => {
-    if (patternAddr) {
-      const pattern = generateWalletPattern(patternAddr, theme);
+    if (address) {
+      const pattern = generateWalletPattern(address, theme);
       document.body.style.backgroundImage = pattern;
       document.body.style.backgroundRepeat = "repeat";
       document.body.style.backgroundAttachment = "fixed";
@@ -1064,7 +1121,7 @@ function App() {
       document.body.style.backgroundImage = "";
     }
     return () => { document.body.style.backgroundImage = ""; };
-  }, [patternAddr, theme]);
+  }, [address, theme]);
 
   const showFaq = page === "faq";
 
