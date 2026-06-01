@@ -1170,6 +1170,58 @@ main {
   transform: rotate(45deg);
 }
 
+/* ---- Time Machine & BTTF ---- */
+
+.time-machine-control {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.time-machine-control input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 6px;
+  cursor: pointer;
+}
+
+.time-machine-value {
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  white-space: nowrap;
+  min-width: 72px;
+  text-align: right;
+}
+
+.bttf-date {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: var(--mono);
+}
+
+.bttf-date:hover {
+  border-color: var(--border-strong);
+}
+
+.bttf-date:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.control-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: help;
+  margin-left: 0.15rem;
+}
+
 /* ---- Color Picker ---- */
 
 .color-picker-section {

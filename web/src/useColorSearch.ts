@@ -1,8 +1,5 @@
 import { useState, useCallback, useRef } from "react";
 import {
-  keccak256,
-  concat,
-  pad,
   toHex,
   encodeFunctionData,
   decodeFunctionResult,
@@ -11,38 +8,13 @@ import {
 import { usePublicClient } from "wagmi";
 import {
   RENDERER_ADDRESS,
-  ART_SELECTION_ADDRESS,
   TRAIT_MAP,
   rendererAbi,
   type TraitName,
 } from "./contracts";
+import { buildPreviewStateOverride } from "./stateOverride";
 import type { TraitSelection } from "./hashCraft";
 import { extractColorsFromSvg } from "./accentColors";
-
-const ART_SELECTION_MAPPING_SLOT = 2n;
-
-function artSelectionSlots(tokenId: bigint) {
-  const baseSlot = keccak256(
-    concat([
-      pad(toHex(tokenId), { size: 32 }),
-      pad(toHex(ART_SELECTION_MAPPING_SLOT), { size: 32 }),
-    ]),
-  );
-  const nextSlot = toHex(BigInt(baseSlot) + 1n, { size: 32 });
-  return {
-    hashSlot: baseSlot as `0x${string}`,
-    selectedBySlot: nextSlot as `0x${string}`,
-  };
-}
-
-function packSelectedBy(
-  address: `0x${string}`,
-  isActive: boolean,
-): `0x${string}` {
-  const addrBig = BigInt(address);
-  const activeBit = isActive ? 1n << 160n : 0n;
-  return toHex(addrBig | activeBit, { size: 32 });
-}
 
 function buildRandomHash(traits: TraitSelection, attempt: number): `0x${string}` {
   const bytes = new Uint8Array(32);
@@ -94,8 +66,6 @@ export function useColorSearch() {
       setResults([]);
 
       const target = targetColor.toLowerCase();
-      const { hashSlot, selectedBySlot } = artSelectionSlots(tokenId);
-      const packedOwner = packSelectedBy(ownerAddress, true);
       const data = encodeFunctionData({
         abi: rendererAbi,
         functionName: "tokenURI",
@@ -117,15 +87,7 @@ export function useColorSearch() {
             .call({
               to: RENDERER_ADDRESS,
               data,
-              stateOverride: [
-                {
-                  address: ART_SELECTION_ADDRESS,
-                  stateDiff: [
-                    { slot: hashSlot, value: hash },
-                    { slot: selectedBySlot, value: packedOwner },
-                  ],
-                },
-              ],
+              stateOverride: buildPreviewStateOverride(tokenId, hash, ownerAddress),
             })
             .then((result) => {
               const uri = decodeFunctionResult({

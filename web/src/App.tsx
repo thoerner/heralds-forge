@@ -6,10 +6,12 @@ import {
   HERALDIA_ADDRESS,
   RENDERER_ADDRESS,
   ART_SELECTION_ADDRESS,
+  ART_SELECTION_V2_ADDRESS,
   STORAGE_ADDRESS,
   heraldiaAbi,
   rendererAbi,
   artSelectionAbi,
+  artSelectionV2Abi,
   storageAbi,
   TRAIT_MAP,
   type TraitName,
@@ -224,9 +226,9 @@ const CONTRACT_INFO = [
   },
   {
     role: "Renderer",
-    name: "HeraldiaRendererV2",
+    name: "HeraldiaRendererV4",
     address: RENDERER_ADDRESS,
-    desc: "The on-chain rendering engine. Computes JSON metadata and SVG artwork entirely on-chain by reading hash bytes and mapping them to visual traits. Called by the token contract\u2019s tokenURI function.",
+    desc: "The on-chain rendering engine. Computes JSON metadata and SVG artwork entirely on-chain by reading hash bytes and mapping them to visual traits. Checks ArtSelectionV2 first, then falls back to V1.",
   },
   {
     role: "Storage",
@@ -235,10 +237,16 @@ const CONTRACT_INFO = [
     desc: "Stores two immutable pieces of per-token data: the original static hash (set at mint) and the transfer count (incremented on every transfer). The static hash never changes.",
   },
   {
-    role: "Art Selection",
+    role: "Art Selection (V1)",
     name: "HeraldiaArtSelection",
     address: ART_SELECTION_ADDRESS,
-    desc: "Allows token owners to override their artwork by submitting any bytes32 hash. The renderer checks this contract first \u2014 if a custom hash is active, it uses that instead of the default owner-derived hash.",
+    desc: "The original art selection contract. Allows token owners to override artwork with a bytes32 hash. Custom art resets on the first transfer.",
+  },
+  {
+    role: "Art Selection (V2)",
+    name: "HeraldiaArtSelectionV2",
+    address: ART_SELECTION_V2_ADDRESS,
+    desc: "The upgraded art selection contract with Time Machine support. Custom art can survive up to 16 transfers, and owners can set an optional \u201cBack to the Future\u201d commemorative date.",
   },
 ];
 
@@ -286,7 +294,9 @@ function TechPage({ onBack }: { onBack: () => void }) {
           <p>
             We preview the result locally using Ethereum&rsquo;s <code>stateOverride</code> feature &mdash; simulating
             the on-chain call with your chosen hash without spending gas. When you&rsquo;re happy, we submit a{" "}
-            <code>selectArt(tokenId, hash)</code> transaction to write it on-chain.
+            <code>selectArt(tokenId, hash, artType, artData)</code> transaction via ArtSelectionV2 to write it on-chain.
+            The <code>artType</code> parameter sets the Time Machine &mdash; how many transfers the custom art survives &mdash;
+            and <code>artData</code> stores an optional commemorative timestamp.
           </p>
         </section>
 
@@ -486,7 +496,13 @@ function Landing({ onFaq }: { onFaq: () => void }) {
           <span className="cite-param">tokenId</span>
           <span className="cite-comma">,{" "}</span>
           <span className="cite-type">bytes32</span>{" "}
-          <span className="cite-param">customHash</span>
+          <span className="cite-param">hash</span>
+          <span className="cite-comma">,{" "}</span>
+          <span className="cite-type">uint8</span>{" "}
+          <span className="cite-param">artType</span>
+          <span className="cite-comma">,{" "}</span>
+          <span className="cite-type">uint256</span>{" "}
+          <span className="cite-param">artData</span>
           <span className="cite-paren">)</span>
           <span className="cite-arrow">&rarr;</span>
         </a>
@@ -683,6 +699,8 @@ function Crafter({
   const [overrideHash, setOverrideHash] = useState<`0x${string}` | null>(null);
   const [targetColor, setTargetColor] = useState<string | null>(null);
   const [colorHash, setColorHash] = useState<`0x${string}` | null>(null);
+  const [timeMachineTransfers, setTimeMachineTransfers] = useState(1);
+  const [backToFutureDate, setBackToFutureDate] = useState("");
 
   const publicClient = usePublicClient();
 
@@ -754,13 +772,20 @@ function Crafter({
     setColorHash(result.hash);
   }
 
-  // On-chain reads
-  const { data: activeHashResult } = useReadContract({
+  // On-chain reads — check V2 first, fall back to V1
+  const { data: v2HashResult } = useReadContract({
+    address: ART_SELECTION_V2_ADDRESS,
+    abi: artSelectionV2Abi,
+    functionName: "getActiveHash",
+    args: [tokenId],
+  });
+  const { data: v1HashResult } = useReadContract({
     address: ART_SELECTION_ADDRESS,
     abi: artSelectionAbi,
     functionName: "getActiveHash",
     args: [tokenId],
   });
+  const activeHashResult = v2HashResult?.[0] ? v2HashResult : v1HashResult;
 
   const { data: staticHash } = useReadContract({
     address: STORAGE_ADDRESS,
@@ -781,6 +806,10 @@ function Crafter({
   const [currentTraits, setCurrentTraits] = useState<
     { trait_type: string; value: string }[]
   >([]);
+
+  // V2 Time Machine metadata (derived from on-chain traits)
+  const timeMachineTrait = currentTraits.find((t) => t.trait_type === "Time Machine");
+  const bttfTrait = currentTraits.find((t) => t.trait_type === "Back to the Future");
   const [loadingCurrent, setLoadingCurrent] = useState(true);
 
   const fetchCurrentArt = useCallback(async () => {
@@ -901,7 +930,7 @@ function Crafter({
       fetchCurrentArt();
       refreshPastLooks();
       refreshOpenSeaMetadata(tokenId);
-      track("apply_art", { tokenId: String(tokenId) });
+      track("apply_art", { tokenId: String(tokenId), timeMachine: timeMachineTransfers });
       if (previewResult?.svg) {
         fetch(import.meta.env.VITE_FORGE_API_URL as string, {
           method: "POST",
@@ -943,19 +972,22 @@ function Crafter({
 
   function handleSelectArt() {
     setTxMessage(null);
+    const artData = backToFutureDate
+      ? BigInt(Math.floor(new Date(backToFutureDate).getTime() / 1000))
+      : BigInt(Math.floor(Date.now() / 1000));
     writeSelectArt({
-      address: ART_SELECTION_ADDRESS,
-      abi: artSelectionAbi,
+      address: ART_SELECTION_V2_ADDRESS,
+      abi: artSelectionV2Abi,
       functionName: "selectArt",
-      args: [tokenId, activeHash],
+      args: [tokenId, activeHash, timeMachineTransfers, artData],
     });
   }
 
   function handleResetArt() {
     setTxMessage(null);
     writeResetArt({
-      address: ART_SELECTION_ADDRESS,
-      abi: artSelectionAbi,
+      address: ART_SELECTION_V2_ADDRESS,
+      abi: artSelectionV2Abi,
       functionName: "resetArt",
       args: [tokenId],
     });
@@ -1016,14 +1048,28 @@ function Crafter({
                 ? <Copyable value={activeHashResult![1]} display={truncHash(activeHashResult![1])} />
                 : "None"}
             </span>
+            {timeMachineTrait && (
+              <>
+                <span className="label">Time Machine</span>
+                <span className="value">{timeMachineTrait.value}</span>
+              </>
+            )}
+            {bttfTrait && (
+              <>
+                <span className="label">Back to the Future</span>
+                <span className="value">{bttfTrait.value}</span>
+              </>
+            )}
           </div>
           <div className="trait-list">
-            {currentTraits.map((t) => (
-              <div key={t.trait_type} className="trait-row">
-                <span className="trait-name">{t.trait_type}</span>
-                <span className="trait-value">{t.value}</span>
-              </div>
-            ))}
+            {currentTraits
+              .filter((t) => t.trait_type !== "Time Machine" && t.trait_type !== "Back to the Future")
+              .map((t) => (
+                <div key={t.trait_type} className="trait-row">
+                  <span className="trait-name">{t.trait_type}</span>
+                  <span className="trait-value">{t.value}</span>
+                </div>
+              ))}
           </div>
 
           {pastLooks.length > 0 && (
@@ -1209,6 +1255,44 @@ function Crafter({
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="control-row">
+                <label>
+                  Time Machine
+                  <span className="control-hint" title="How many transfers your custom art survives before reverting">
+                    &#9432;
+                  </span>
+                </label>
+                <div className="time-machine-control">
+                  <input
+                    type="range"
+                    min={1}
+                    max={16}
+                    value={timeMachineTransfers}
+                    onChange={(e) => setTimeMachineTransfers(Number(e.target.value))}
+                  />
+                  <span className="time-machine-value">
+                    {timeMachineTransfers === 1
+                      ? "1 transfer"
+                      : `${timeMachineTransfers} transfers`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="control-row">
+                <label>
+                  Back to the Future
+                  <span className="control-hint" title="Optional commemorative date stored on-chain with your art">
+                    &#9432;
+                  </span>
+                </label>
+                <input
+                  type="date"
+                  className="bttf-date"
+                  value={backToFutureDate}
+                  onChange={(e) => setBackToFutureDate(e.target.value)}
+                />
               </div>
             </div>
           )}

@@ -1,43 +1,14 @@
 import { useState, useCallback } from "react";
 import {
-  keccak256,
-  concat,
-  pad,
-  toHex,
   encodeFunctionData,
   decodeFunctionResult,
 } from "viem";
 import { usePublicClient } from "wagmi";
 import {
   RENDERER_ADDRESS,
-  ART_SELECTION_ADDRESS,
   rendererAbi,
 } from "./contracts";
-
-const ART_SELECTION_MAPPING_SLOT = 2n;
-
-function artSelectionSlots(tokenId: bigint) {
-  const baseSlot = keccak256(
-    concat([
-      pad(toHex(tokenId), { size: 32 }),
-      pad(toHex(ART_SELECTION_MAPPING_SLOT), { size: 32 }),
-    ]),
-  );
-  const nextSlot = toHex(BigInt(baseSlot) + 1n, { size: 32 });
-  return {
-    hashSlot: baseSlot as `0x${string}`,
-    selectedBySlot: nextSlot as `0x${string}`,
-  };
-}
-
-function packSelectedBy(
-  address: `0x${string}`,
-  isActive: boolean,
-): `0x${string}` {
-  const addrBig = BigInt(address);
-  const activeBit = isActive ? 1n << 160n : 0n;
-  return toHex(addrBig | activeBit, { size: 32 });
-}
+import { buildPreviewStateOverride } from "./stateOverride";
 
 export interface PreviewResult {
   svg: string;
@@ -66,9 +37,6 @@ export function usePreview() {
       setError(null);
 
       try {
-        const { hashSlot, selectedBySlot } = artSelectionSlots(tokenId);
-        const packedOwner = packSelectedBy(owner, true);
-
         const data = encodeFunctionData({
           abi: rendererAbi,
           functionName: "tokenURI",
@@ -78,15 +46,7 @@ export function usePreview() {
         const callResult = await publicClient.call({
           to: RENDERER_ADDRESS,
           data,
-          stateOverride: [
-            {
-              address: ART_SELECTION_ADDRESS,
-              stateDiff: [
-                { slot: hashSlot, value: customHash },
-                { slot: selectedBySlot, value: packedOwner },
-              ],
-            },
-          ],
+          stateOverride: buildPreviewStateOverride(tokenId, customHash, owner),
         });
 
         const uri = decodeFunctionResult({

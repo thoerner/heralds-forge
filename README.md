@@ -114,43 +114,50 @@ npm install   # from repo root
 
 #### Viewing & previewing
 
-| Command | Description |
-| --- | --- |
-| `npm run fetch -- <tokenId>` | Fetch and save current on-chain artwork |
-| `npm run preview -- <tokenId> --hash <bytes32>` | Preview artwork with a specific hash |
-| `npm run preview -- <tokenId> --wallet <address>` | Preview as if a wallet owned the token |
-| `npm run preview -- <tokenId> --random` | Preview with a random hash |
-| `npm run history -- <tokenId>` | List all past art hashes from on-chain events |
-| `npm run history -- <tokenId> --preview` | Same, but also generate SVG previews |
+
+| Command                                           | Description                                   |
+| ------------------------------------------------- | --------------------------------------------- |
+| `npm run fetch -- <tokenId>`                      | Fetch and save current on-chain artwork       |
+| `npm run preview -- <tokenId> --hash <bytes32>`   | Preview artwork with a specific hash          |
+| `npm run preview -- <tokenId> --wallet <address>` | Preview as if a wallet owned the token        |
+| `npm run preview -- <tokenId> --random`           | Preview with a random hash                    |
+| `npm run history -- <tokenId>`                    | List all past art hashes from on-chain events |
+| `npm run history -- <tokenId> --preview`          | Same, but also generate SVG previews          |
+
 
 #### Crafting & color discovery
 
-| Command | Description |
-| --- | --- |
-| `npm run craft -- <tokenId> --Theme Sun --Pattern Dot --Background "Grid Bold"` | Build a hash from desired traits |
-| `npm run craft -- <tokenId> --seed 42 --Theme Moon` | Same, with a deterministic variation seed |
-| `npm run color-list` | List all known accent colors from probe data |
-| `npm run color-search -- <tokenId> <#hex>` | Brute-force hashes to find a target color |
-| `npm run sweep -- <tokenId> --Background Solid --Pattern Cross` | Discover all reachable colors for a trait combo |
+
+| Command                                                                         | Description                                     |
+| ------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `npm run craft -- <tokenId> --Theme Sun --Pattern Dot --Background "Grid Bold"` | Build a hash from desired traits                |
+| `npm run craft -- <tokenId> --seed 42 --Theme Moon`                             | Same, with a deterministic variation seed       |
+| `npm run color-list`                                                            | List all known accent colors from probe data    |
+| `npm run color-search -- <tokenId> <#hex>`                                      | Brute-force hashes to find a target color       |
+| `npm run sweep -- <tokenId> --Background Solid --Pattern Cross`                 | Discover all reachable colors for a trait combo |
+
 
 #### On-chain writes
 
-| Command | Description |
-| --- | --- |
-| `npm run apply -- <tokenId> <hash>` | Apply custom art on-chain (`selectArt`) |
-| `npm run reset -- <tokenId>` | Reset to default art on-chain (`resetArt`) |
+
+| Command                             | Description                                |
+| ----------------------------------- | ------------------------------------------ |
+| `npm run apply -- <tokenId> <hash>` | Apply custom art on-chain (`selectArt`)    |
+| `npm run reset -- <tokenId>`        | Reset to default art on-chain (`resetArt`) |
+
 
 Both show a gas estimate and require `y` confirmation before submitting.
 
 #### Analysis (advanced)
 
-| Command | Description |
-| --- | --- |
-| `npm run probe -- <tokenId>` | Systematically vary hash bytes to map traits |
-| `npm run analyze` | Derive byte-to-trait mapping from probe results |
+
+| Command                      | Description                                     |
+| ---------------------------- | ----------------------------------------------- |
+| `npm run probe -- <tokenId>` | Systematically vary hash bytes to map traits    |
+| `npm run analyze`            | Derive byte-to-trait mapping from probe results |
+
 
 A default `output/trait-map.json` is included in the repo. Run `probe` then `analyze` only if you want to regenerate it yourself.
-
 
 ## License
 

@@ -1,41 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import {
-  keccak256,
-  concat,
-  pad,
-  toHex,
   encodeFunctionData,
   decodeFunctionResult,
 } from "viem";
 import { usePublicClient } from "wagmi";
 import {
   RENDERER_ADDRESS,
-  ART_SELECTION_ADDRESS,
   TRAIT_MAP,
   rendererAbi,
 } from "./contracts";
+import { buildPreviewStateOverride } from "./stateOverride";
 import type { TraitSelection } from "./hashCraft";
 import { extractColorsFromSvg } from "./accentColors";
-
-const ART_SELECTION_MAPPING_SLOT = 2n;
-
-function artSelectionSlots(tokenId: bigint) {
-  const baseSlot = keccak256(
-    concat([
-      pad(toHex(tokenId), { size: 32 }),
-      pad(toHex(ART_SELECTION_MAPPING_SLOT), { size: 32 }),
-    ]),
-  );
-  const nextSlot = toHex(BigInt(baseSlot) + 1n, { size: 32 });
-  return {
-    hashSlot: baseSlot as `0x${string}`,
-    selectedBySlot: nextSlot as `0x${string}`,
-  };
-}
-
-function packSelectedBy(address: `0x${string}`): `0x${string}` {
-  return toHex(BigInt(address) | (1n << 160n), { size: 32 });
-}
 
 function buildSweepHash(
   traits: TraitSelection,
@@ -108,8 +84,6 @@ export function useColorSweep(
     setColorToHash(new Map());
     setHasRun(true);
 
-    const { hashSlot, selectedBySlot } = artSelectionSlots(tokenId);
-    const packedOwner = packSelectedBy(ownerAddress);
     const callData = encodeFunctionData({
       abi: rendererAbi,
       functionName: "tokenURI",
@@ -123,15 +97,7 @@ export function useColorSweep(
       const result = await publicClient!.call({
         to: RENDERER_ADDRESS,
         data: callData,
-        stateOverride: [
-          {
-            address: ART_SELECTION_ADDRESS,
-            stateDiff: [
-              { slot: hashSlot, value: hash },
-              { slot: selectedBySlot, value: packedOwner },
-            ],
-          },
-        ],
+        stateOverride: buildPreviewStateOverride(tokenId, hash, ownerAddress),
       });
       const uri = decodeFunctionResult({
         abi: rendererAbi,

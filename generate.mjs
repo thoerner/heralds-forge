@@ -25,6 +25,7 @@ config();
 const HERALDIA = process.env.TOKEN_CONTRACT_ADDRESS;
 const RENDERER = process.env.RENDERER_CONTRACT_ADDRESS;
 const ART_SELECTION = process.env.ART_SELECTION_CONTRACT_ADDRESS;
+const ART_SELECTION_V2 = process.env.ART_SELECTION_V2_CONTRACT_ADDRESS || "0x1d6e96E9E89548807865b873261e090245dFCAcC";
 const STORAGE = process.env.STORAGE_CONTRACT_ADDRESS;
 const RPC_URL = process.env.RPC_URL || "https://ethereum-rpc.publicnode.com";
 
@@ -42,6 +43,14 @@ const artSelectionAbi = parseAbi([
   "function selectArt(uint256 tokenId, bytes32 customHash)",
   "function resetArt(uint256 tokenId)",
   "event ArtSelected(uint256 indexed tokenId, address indexed selectedBy, bytes32 customHash)",
+]);
+
+const artSelectionV2Abi = parseAbi([
+  "function getActiveHash(uint256 tokenId) view returns (bool isActive, bytes32 customHash)",
+  "function hasCustomArt(uint256 tokenId) view returns (bool)",
+  "function selectArt(uint256 tokenId, bytes32 customHash, uint8 artType, uint256 artData)",
+  "function resetArt(uint256 tokenId)",
+  "event ArtSelected(uint256 indexed tokenId, address indexed selectedBy, bytes32 customHash, uint8 artType, uint256 artData)",
 ]);
 
 const storageAbi = parseAbi([
@@ -949,9 +958,17 @@ async function cmdColorList() {
 // Apply: write custom art on-chain
 // ---------------------------------------------------------------------------
 
-async function cmdApply(tokenId, hash) {
+async function cmdApply(tokenId, hash, options = {}) {
+  const transfers = Math.min(16, Math.max(1, options.transfers || 1));
+  const dateStr = options.date || null;
+  const artData = dateStr
+    ? BigInt(Math.floor(new Date(dateStr).getTime() / 1000))
+    : BigInt(Math.floor(Date.now() / 1000));
+
   console.log(`\nApplying custom art for token #${tokenId}...`);
   console.log(`  Hash: ${hash}`);
+  console.log(`  Time Machine: ${transfers} transfer${transfers > 1 ? "s" : ""}`);
+  if (dateStr) console.log(`  Back to the Future: ${dateStr}`);
 
   const walletClient = getWalletClient();
   const account = walletClient.account;
@@ -979,12 +996,12 @@ async function cmdApply(tokenId, hash) {
   printTraits(metadata);
   saveArtwork(tokenId, hash.slice(0, 10), metadata, svg);
 
-  // Gas estimation
+  // Gas estimation (using V2)
   const gasEstimate = await client.estimateContractGas({
-    address: ART_SELECTION,
-    abi: artSelectionAbi,
+    address: ART_SELECTION_V2,
+    abi: artSelectionV2Abi,
     functionName: "selectArt",
-    args: [BigInt(tokenId), hash],
+    args: [BigInt(tokenId), hash, transfers, artData],
     account: account.address,
   });
 
@@ -1000,10 +1017,10 @@ async function cmdApply(tokenId, hash) {
 
   console.log("  Sending transaction...");
   const txHash = await walletClient.writeContract({
-    address: ART_SELECTION,
-    abi: artSelectionAbi,
+    address: ART_SELECTION_V2,
+    abi: artSelectionV2Abi,
     functionName: "selectArt",
-    args: [BigInt(tokenId), hash],
+    args: [BigInt(tokenId), hash, transfers, artData],
   });
   console.log(`  Tx hash: ${txHash}`);
   console.log("  Waiting for confirmation...");
@@ -1038,12 +1055,22 @@ async function cmdReset(tokenId) {
     process.exit(1);
   }
 
-  const activeHash = await client.readContract({
-    address: ART_SELECTION,
-    abi: artSelectionAbi,
+  // Check V2 first, then V1
+  let activeHash = await client.readContract({
+    address: ART_SELECTION_V2,
+    abi: artSelectionV2Abi,
     functionName: "getActiveHash",
     args: [BigInt(tokenId)],
   });
+  let useV2 = activeHash[0];
+  if (!useV2) {
+    activeHash = await client.readContract({
+      address: ART_SELECTION,
+      abi: artSelectionAbi,
+      functionName: "getActiveHash",
+      args: [BigInt(tokenId)],
+    });
+  }
 
   if (!activeHash[0]) {
     console.log("  No custom art is currently set for this token.");
@@ -1051,12 +1078,16 @@ async function cmdReset(tokenId) {
     return;
   }
 
+  const resetContract = useV2 ? ART_SELECTION_V2 : ART_SELECTION;
+  const resetAbi = useV2 ? artSelectionV2Abi : artSelectionAbi;
+
   console.log(`  Current custom hash: ${activeHash[1]}`);
+  console.log(`  Contract: ${useV2 ? "V2" : "V1"}`);
   console.log(`  Owner: ${owner} (you)`);
 
   const gasEstimate = await client.estimateContractGas({
-    address: ART_SELECTION,
-    abi: artSelectionAbi,
+    address: resetContract,
+    abi: resetAbi,
     functionName: "resetArt",
     args: [BigInt(tokenId)],
     account: account.address,
@@ -1074,8 +1105,8 @@ async function cmdReset(tokenId) {
 
   console.log("  Sending transaction...");
   const txHash = await walletClient.writeContract({
-    address: ART_SELECTION,
-    abi: artSelectionAbi,
+    address: resetContract,
+    abi: resetAbi,
     functionName: "resetArt",
     args: [BigInt(tokenId)],
   });
@@ -1096,13 +1127,26 @@ async function cmdReset(tokenId) {
 async function cmdHistory(tokenId, options = {}) {
   console.log(`\nFetching art history for token #${tokenId}...`);
 
-  const logs = await client.getLogs({
-    address: ART_SELECTION,
-    event: artSelectionAbi.find((e) => e.type === "event" && e.name === "ArtSelected"),
-    args: { tokenId: BigInt(tokenId) },
-    fromBlock: 0n,
-    toBlock: "latest",
-  });
+  const [v1Logs, v2Logs] = await Promise.all([
+    client.getLogs({
+      address: ART_SELECTION,
+      event: artSelectionAbi.find((e) => e.type === "event" && e.name === "ArtSelected"),
+      args: { tokenId: BigInt(tokenId) },
+      fromBlock: 0n,
+      toBlock: "latest",
+    }),
+    client.getLogs({
+      address: ART_SELECTION_V2,
+      event: artSelectionV2Abi.find((e) => e.type === "event" && e.name === "ArtSelected"),
+      args: { tokenId: BigInt(tokenId) },
+      fromBlock: 0n,
+      toBlock: "latest",
+    }),
+  ]);
+
+  const logs = [...v1Logs, ...v2Logs].sort((a, b) =>
+    a.blockNumber < b.blockNumber ? -1 : a.blockNumber > b.blockNumber ? 1 : 0
+  );
 
   if (logs.length === 0) {
     console.log("  No custom art has ever been applied to this token.\n");
@@ -1300,9 +1344,12 @@ Usage:
   node generate.mjs color-list                                          List all known accent colors
   node generate.mjs color-search <tokenId> <#hex> [--max N] [--<Trait> <value>]
                                                                         Brute-force hashes for a target color
-  node generate.mjs apply        <tokenId> <hash>                       Apply custom art on-chain (selectArt)
+  node generate.mjs apply        <tokenId> <hash> [--transfers N] [--date YYYY-MM-DD]
+                                                                        Apply custom art on-chain via V2 selectArt
+                                                                        --transfers  Time Machine: survive 1–16 transfers (default 1)
+                                                                        --date       Back to the Future: commemorative date
   node generate.mjs reset        <tokenId>                              Reset to default art on-chain (resetArt)
-  node generate.mjs history      <tokenId> [--preview]                  Show past art from on-chain events
+  node generate.mjs history      <tokenId> [--preview]                  Show past art from V1+V2 on-chain events
   node generate.mjs sweep        <tokenId> [--<Trait> <value>] [--concurrency N]
                                                                         Discover available colors for a trait combo
 
@@ -1314,7 +1361,8 @@ Examples:
   node generate.mjs craft 1702 --Background "Grid Bold" --Pattern "Cross"
   node generate.mjs color-list
   node generate.mjs color-search 1702 "#efaf00" --max 200 --Background "Solid"
-  node generate.mjs apply 1702 0x000000c0e3d195d9f119c2f3e309bc645571b62d83002cda3b97d652dbf0dd28
+  node generate.mjs apply 1702 0x000000c0e3d195d9f119c2f3e309bc645571b62d83002cda3b97d652dbf0dd28 --transfers 8
+  node generate.mjs apply 1702 0x000000c0e3d195d9f119c2f3e309bc645571b62d83002cda3b97d652dbf0dd28 --date 2026-06-01
   node generate.mjs reset 1702
   node generate.mjs history 1702 --preview
   node generate.mjs sweep 1702 --Background "Solid" --Pattern "Cross"
@@ -1430,14 +1478,18 @@ async function main() {
     const tokenId = args[1];
     const hash = args[2];
     if (!tokenId || !hash) {
-      console.error("Error: usage: node generate.mjs apply <tokenId> <hash>");
+      console.error("Error: usage: node generate.mjs apply <tokenId> <hash> [--transfers N] [--date YYYY-MM-DD]");
       process.exit(1);
     }
     if (!hash.startsWith("0x") || hash.length !== 66) {
       console.error("Error: hash must be a 66-char hex bytes32 value (0x + 64 hex chars).");
       process.exit(1);
     }
-    await cmdApply(tokenId, hash);
+    const tIdx = args.indexOf("--transfers");
+    const transfers = tIdx !== -1 ? Number(args[tIdx + 1]) : 1;
+    const dIdx = args.indexOf("--date");
+    const date = dIdx !== -1 ? args[dIdx + 1] : null;
+    await cmdApply(tokenId, hash, { transfers, date });
     return;
   }
 

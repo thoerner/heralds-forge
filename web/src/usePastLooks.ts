@@ -1,9 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  keccak256,
-  concat,
-  pad,
-  toHex,
   encodeFunctionData,
   decodeFunctionResult,
   type PublicClient,
@@ -12,33 +8,10 @@ import { usePublicClient } from "wagmi";
 import {
   RENDERER_ADDRESS,
   ART_SELECTION_ADDRESS,
+  ART_SELECTION_V2_ADDRESS,
   rendererAbi,
 } from "./contracts";
-
-const ART_SELECTION_MAPPING_SLOT = 2n;
-
-function artSelectionSlots(tokenId: bigint) {
-  const baseSlot = keccak256(
-    concat([
-      pad(toHex(tokenId), { size: 32 }),
-      pad(toHex(ART_SELECTION_MAPPING_SLOT), { size: 32 }),
-    ]),
-  );
-  const nextSlot = toHex(BigInt(baseSlot) + 1n, { size: 32 });
-  return {
-    hashSlot: baseSlot as `0x${string}`,
-    selectedBySlot: nextSlot as `0x${string}`,
-  };
-}
-
-function packSelectedBy(
-  address: `0x${string}`,
-  isActive: boolean,
-): `0x${string}` {
-  const addrBig = BigInt(address);
-  const activeBit = isActive ? 1n << 160n : 0n;
-  return toHex(addrBig | activeBit, { size: 32 });
-}
+import { buildPreviewStateOverride } from "./stateOverride";
 
 export interface PastLook {
   hash: `0x${string}`;
@@ -54,9 +27,6 @@ async function fetchPreviewSvg(
   owner: `0x${string}`,
 ): Promise<string | null> {
   try {
-    const { hashSlot, selectedBySlot } = artSelectionSlots(tokenId);
-    const packedOwner = packSelectedBy(owner, true);
-
     const data = encodeFunctionData({
       abi: rendererAbi,
       functionName: "tokenURI",
@@ -66,15 +36,7 @@ async function fetchPreviewSvg(
     const callResult = await client.call({
       to: RENDERER_ADDRESS,
       data,
-      stateOverride: [
-        {
-          address: ART_SELECTION_ADDRESS,
-          stateDiff: [
-            { slot: hashSlot, value: customHash },
-            { slot: selectedBySlot, value: packedOwner },
-          ],
-        },
-      ],
+      stateOverride: buildPreviewStateOverride(tokenId, customHash, owner),
     });
 
     const uri = decodeFunctionResult({
@@ -117,26 +79,50 @@ export function usePastLooks(
     async function load() {
       setLoading(true);
       try {
-        const logs = await publicClient!.getLogs({
-          address: ART_SELECTION_ADDRESS,
-          event: {
-            type: "event" as const,
-            name: "ArtSelected" as const,
-            inputs: [
-              { name: "tokenId", type: "uint256", indexed: true } as const,
-              { name: "selectedBy", type: "address", indexed: true } as const,
-              { name: "customHash", type: "bytes32", indexed: false } as const,
-            ],
-          },
-          args: { tokenId },
-          fromBlock: 0n,
-          toBlock: "latest",
-        });
+        const [v1Logs, v2Logs] = await Promise.all([
+          publicClient!.getLogs({
+            address: ART_SELECTION_ADDRESS,
+            event: {
+              type: "event" as const,
+              name: "ArtSelected" as const,
+              inputs: [
+                { name: "tokenId", type: "uint256", indexed: true } as const,
+                { name: "selectedBy", type: "address", indexed: true } as const,
+                { name: "customHash", type: "bytes32", indexed: false } as const,
+              ],
+            },
+            args: { tokenId },
+            fromBlock: 0n,
+            toBlock: "latest",
+          }),
+          publicClient!.getLogs({
+            address: ART_SELECTION_V2_ADDRESS,
+            event: {
+              type: "event" as const,
+              name: "ArtSelected" as const,
+              inputs: [
+                { name: "tokenId", type: "uint256", indexed: true } as const,
+                { name: "selectedBy", type: "address", indexed: true } as const,
+                { name: "customHash", type: "bytes32", indexed: false } as const,
+                { name: "artType", type: "uint8", indexed: false } as const,
+                { name: "artData", type: "uint256", indexed: false } as const,
+              ],
+            },
+            args: { tokenId },
+            fromBlock: 0n,
+            toBlock: "latest",
+          }),
+        ]);
 
         if (cancelled) return;
 
         const seen = new Map<string, { selectedBy: `0x${string}`; block: bigint }>();
-        for (const log of logs) {
+        for (const log of v1Logs) {
+          const hash = log.args.customHash!;
+          const selectedBy = log.args.selectedBy!;
+          seen.set(hash, { selectedBy, block: log.blockNumber });
+        }
+        for (const log of v2Logs) {
           const hash = log.args.customHash!;
           const selectedBy = log.args.selectedBy!;
           seen.set(hash, { selectedBy, block: log.blockNumber });
