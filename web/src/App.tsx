@@ -8,12 +8,15 @@ import {
   ART_SELECTION_ADDRESS,
   ART_SELECTION_V2_ADDRESS,
   STORAGE_ADDRESS,
+  COLOR_ANIMATION_ADDRESS,
   heraldiaAbi,
   rendererAbi,
   artSelectionAbi,
   artSelectionV2Abi,
   storageAbi,
+  colorAnimationAbi,
   TRAIT_MAP,
+  ANIMATION_MODES,
   type TraitName,
 } from "./contracts";
 import { craftHash, randomSeed, type TraitSelection } from "./hashCraft";
@@ -226,9 +229,9 @@ const CONTRACT_INFO = [
   },
   {
     role: "Renderer",
-    name: "HeraldiaRendererV4",
+    name: "HeraldiaRendererV5",
     address: RENDERER_ADDRESS,
-    desc: "The on-chain rendering engine. Computes JSON metadata and SVG artwork entirely on-chain by reading hash bytes and mapping them to visual traits. Checks ArtSelectionV2 first, then falls back to V1.",
+    desc: "The on-chain rendering engine. Computes JSON metadata and SVG artwork entirely on-chain by reading hash bytes and mapping them to visual traits. Supports color animations and checks ArtSelectionV2 first, then falls back to V1.",
   },
   {
     role: "Storage",
@@ -247,6 +250,12 @@ const CONTRACT_INFO = [
     name: "HeraldiaArtSelectionV2",
     address: ART_SELECTION_V2_ADDRESS,
     desc: "The upgraded art selection contract with Time Machine support. Custom art can survive up to 16 transfers, and owners can set an optional \u201cBack to the Future\u201d commemorative date.",
+  },
+  {
+    role: "Color Animation",
+    name: "HeraldiaColorAnimation",
+    address: COLOR_ANIMATION_ADDRESS,
+    desc: "Adds animated color effects to artwork. Token owners can choose from 10 animation modes including Colour Wave, Pulse, Aurora, Prism Wave, and Glitch effects applied to either background or pattern.",
   },
 ];
 
@@ -281,6 +290,7 @@ function TechPage({ onBack }: { onBack: () => void }) {
             <li>If none, it computes <code>keccak256(owner, tokenId)</code> as the default</li>
             <li>The active hash bytes are mapped to traits (theme, pattern, background, colors, etc.)</li>
             <li>The Renderer calls the <strong>Color Wrapper</strong> to generate the full SVG</li>
+            <li>If a <strong>Color Animation</strong> is active, SVG filter/animate elements are injected</li>
             <li>Everything is assembled into a JSON metadata object with a base64-encoded SVG</li>
           </ol>
         </section>
@@ -701,6 +711,7 @@ function Crafter({
   const [colorHash, setColorHash] = useState<`0x${string}` | null>(null);
   const [timeMachineTransfers, setTimeMachineTransfers] = useState(1);
   const [backToFutureDate, setBackToFutureDate] = useState("");
+  const [animationMode, setAnimationMode] = useState(0);
 
   const publicClient = usePublicClient();
 
@@ -880,9 +891,9 @@ function Crafter({
   } = usePreview();
 
   const runPreview = useCallback(() => {
-    preview(tokenId, activeHash, ownerAddress);
+    preview(tokenId, activeHash, ownerAddress, animationMode || undefined);
     track("preview", { theme: traits.Theme, pattern: traits.Pattern, bg: traits.Background });
-  }, [tokenId, ownerAddress, activeHash, preview, traits]);
+  }, [tokenId, ownerAddress, activeHash, preview, traits, animationMode]);
 
   useEffect(() => {
     const timer = setTimeout(runPreview, 300);
@@ -902,6 +913,12 @@ function Crafter({
     data: resetArtTxHash,
     reset: resetResetArt,
   } = useWriteContract();
+  const {
+    writeContract: writeSetAnimation,
+    isPending: setAnimationPending,
+    data: setAnimationTxHash,
+    reset: resetSetAnimation,
+  } = useWriteContract();
 
   const {
     isLoading: selectArtConfirming,
@@ -912,6 +929,10 @@ function Crafter({
     isLoading: resetArtConfirming,
     isSuccess: resetArtConfirmed,
   } = useWaitForTransactionReceipt({ hash: resetArtTxHash });
+  const {
+    isLoading: setAnimationConfirming,
+    isSuccess: setAnimationConfirmed,
+  } = useWaitForTransactionReceipt({ hash: setAnimationTxHash });
 
   const hasCustomArt = activeHashResult?.[0] === true;
   const onChainHash = hasCustomArt ? activeHashResult![1] : null;
@@ -970,6 +991,26 @@ function Crafter({
     }
   }, [resetArtConfirmed, fetchCurrentArt, refreshPastLooks, resetResetArt]);
 
+  useEffect(() => {
+    if (setAnimationConfirming) {
+      setTxMessage({ type: "info", text: "Animation transaction pending\u2026" });
+    }
+  }, [setAnimationConfirming]);
+
+  useEffect(() => {
+    if (setAnimationConfirmed) {
+      setTxMessage({ type: "success", text: "Animation set on-chain!" });
+      fetchCurrentArt();
+      refreshOpenSeaMetadata(tokenId);
+      track("set_animation", { tokenId: String(tokenId), mode: animationMode });
+      const timer = setTimeout(() => {
+        setTxMessage(null);
+        resetSetAnimation();
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [setAnimationConfirmed, fetchCurrentArt, resetSetAnimation, tokenId, animationMode]);
+
   function handleSelectArt() {
     setTxMessage(null);
     const artData = backToFutureDate
@@ -992,6 +1033,19 @@ function Crafter({
       args: [tokenId],
     });
   }
+
+  function handleSetAnimation() {
+    setTxMessage(null);
+    writeSetAnimation({
+      address: COLOR_ANIMATION_ADDRESS,
+      abi: colorAnimationAbi,
+      functionName: "setAnimation",
+      args: [tokenId, animationMode],
+    });
+  }
+
+  const animationTrait = currentTraits.find((t) => t.trait_type === "Animation");
+  const currentAnimationLabel = animationTrait?.value ?? "None";
 
   return (
     <>
@@ -1048,6 +1102,8 @@ function Crafter({
                 ? <Copyable value={activeHashResult![1]} display={truncHash(activeHashResult![1])} />
                 : "None"}
             </span>
+            <span className="label">Animation</span>
+            <span className="value">{currentAnimationLabel}</span>
             {timeMachineTrait && (
               <>
                 <span className="label">Time Machine</span>
@@ -1063,7 +1119,7 @@ function Crafter({
           </div>
           <div className="trait-list">
             {currentTraits
-              .filter((t) => t.trait_type !== "Time Machine" && t.trait_type !== "Back to the Future")
+              .filter((t) => t.trait_type !== "Time Machine" && t.trait_type !== "Back to the Future" && t.trait_type !== "Animation")
               .map((t) => (
                 <div key={t.trait_type} className="trait-row">
                   <span className="trait-name">{t.trait_type}</span>
@@ -1294,6 +1350,25 @@ function Crafter({
                   onChange={(e) => setBackToFutureDate(e.target.value)}
                 />
               </div>
+
+              <div className="control-row">
+                <label>
+                  Animation
+                  <span className="control-hint" title="Color animation applied to the artwork. Set separately from art selection.">
+                    &#9432;
+                  </span>
+                </label>
+                <select
+                  value={animationMode}
+                  onChange={(e) => setAnimationMode(Number(e.target.value))}
+                >
+                  {ANIMATION_MODES.map((m) => (
+                    <option key={m.mode} value={m.mode}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
 
@@ -1353,6 +1428,17 @@ function Crafter({
                   : selectArtConfirming
                     ? "Mining\u2026"
                     : "Apply On-Chain"}
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={handleSetAnimation}
+                disabled={setAnimationPending || setAnimationConfirming}
+              >
+                {setAnimationPending
+                  ? "Confirm in wallet\u2026"
+                  : setAnimationConfirming
+                    ? "Mining\u2026"
+                    : `Set Animation${animationMode === 0 ? " (Off)" : ""}`}
               </button>
               <button
                 className="btn-secondary"

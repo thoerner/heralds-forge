@@ -27,6 +27,7 @@ export function usePreview() {
       tokenId: bigint,
       customHash: `0x${string}`,
       owner: `0x${string}`,
+      animationMode?: number,
     ) => {
       if (!publicClient) {
         setError("No RPC client available");
@@ -46,7 +47,7 @@ export function usePreview() {
         const callResult = await publicClient.call({
           to: RENDERER_ADDRESS,
           data,
-          stateOverride: buildPreviewStateOverride(tokenId, customHash, owner),
+          stateOverride: buildPreviewStateOverride(tokenId, customHash, owner, animationMode),
         });
 
         const uri = decodeFunctionResult({

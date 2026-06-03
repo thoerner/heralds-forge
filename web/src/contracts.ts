@@ -3,13 +3,15 @@ import { type Abi } from "viem";
 export const HERALDIA_ADDRESS =
   "0x11A7E42036F8D039b0ce54b5488E3df0dfF6Cf36" as const;
 export const RENDERER_ADDRESS =
-  "0x2F76c69838eCAd1D7AfD318bE7a31754e045e760" as const;
+  "0x311760b494dA6cd0930F3D94e3437DE910f53430" as const;
 export const ART_SELECTION_ADDRESS =
   "0x3Af98Fb4dC151AF77C6bE0012Efa165033E88769" as const;
 export const ART_SELECTION_V2_ADDRESS =
   "0x1d6e96E9E89548807865b873261e090245dFCAcC" as const;
 export const STORAGE_ADDRESS =
   "0x0D562A65d3A209738Eba9601A88Bb0A62bc66391" as const;
+export const COLOR_ANIMATION_ADDRESS =
+  "0x8c68520e88773f4e799421e89b381f1cdb2bde3a" as const;
 
 export const heraldiaAbi = [
   {
@@ -145,6 +147,33 @@ export const storageAbi = [
     stateMutability: "view",
   },
 ] as const satisfies Abi;
+
+export const colorAnimationAbi = [
+  {
+    type: "function",
+    name: "setAnimation",
+    inputs: [
+      { name: "tokenId", type: "uint256" },
+      { name: "mode", type: "uint8" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+] as const satisfies Abi;
+
+export const ANIMATION_MODES = [
+  { mode: 0, label: "None" },
+  { mode: 1, label: "Colour Wave - Background" },
+  { mode: 2, label: "Colour Wave - Pattern" },
+  { mode: 3, label: "Pulse - Background" },
+  { mode: 4, label: "Pulse - Pattern" },
+  { mode: 5, label: "Aurora - Background" },
+  { mode: 6, label: "Aurora - Pattern" },
+  { mode: 7, label: "Prism Wave - Background" },
+  { mode: 8, label: "Prism Wave - Pattern" },
+  { mode: 9, label: "Glitch - Background" },
+  { mode: 10, label: "Glitch - Pattern" },
+] as const;
 
 // Trait map derived from empirical probing (output/trait-map.json)
 export const TRAIT_MAP = {

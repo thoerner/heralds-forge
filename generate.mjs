@@ -27,6 +27,7 @@ const RENDERER = process.env.RENDERER_CONTRACT_ADDRESS;
 const ART_SELECTION = process.env.ART_SELECTION_CONTRACT_ADDRESS;
 const ART_SELECTION_V2 = process.env.ART_SELECTION_V2_CONTRACT_ADDRESS || "0x1d6e96E9E89548807865b873261e090245dFCAcC";
 const STORAGE = process.env.STORAGE_CONTRACT_ADDRESS;
+const COLOR_ANIMATION = process.env.COLOR_ANIMATION_CONTRACT_ADDRESS || "0x8c68520e88773f4e799421e89b381f1cdb2bde3a";
 const RPC_URL = process.env.RPC_URL || "https://ethereum-rpc.publicnode.com";
 
 const heraldiaAbi = parseAbi([
@@ -57,6 +58,24 @@ const storageAbi = parseAbi([
   "function getStaticHash(uint256 tokenId) view returns (bytes32)",
   "function getTransferCount(uint256 tokenId) view returns (uint256)",
 ]);
+
+const colorAnimationAbi = parseAbi([
+  "function setAnimation(uint256 tokenId, uint8 mode)",
+]);
+
+const ANIMATION_MODES = {
+  0: "None",
+  1: "Colour Wave - Background",
+  2: "Colour Wave - Pattern",
+  3: "Pulse - Background",
+  4: "Pulse - Pattern",
+  5: "Aurora - Background",
+  6: "Aurora - Pattern",
+  7: "Prism Wave - Background",
+  8: "Prism Wave - Pattern",
+  9: "Glitch - Background",
+  10: "Glitch - Pattern",
+};
 
 const client = createPublicClient({
   chain: mainnet,
@@ -1121,6 +1140,69 @@ async function cmdReset(tokenId) {
 }
 
 // ---------------------------------------------------------------------------
+// Set Animation: apply a color animation mode on-chain
+// ---------------------------------------------------------------------------
+
+async function cmdSetAnimation(tokenId, mode) {
+  mode = Math.min(10, Math.max(0, Number(mode)));
+  const modeName = ANIMATION_MODES[mode] || `Mode ${mode}`;
+  console.log(`\nSetting animation for token #${tokenId} to ${modeName} (mode ${mode})...`);
+
+  const walletClient = getWalletClient();
+  const account = walletClient.account;
+
+  const owner = await client.readContract({
+    address: HERALDIA,
+    abi: heraldiaAbi,
+    functionName: "ownerOf",
+    args: [BigInt(tokenId)],
+  });
+
+  if (owner.toLowerCase() !== account.address.toLowerCase()) {
+    console.error(`\n  Error: You (${account.address}) do not own token #${tokenId}.`);
+    console.error(`  Owner: ${owner}`);
+    process.exit(1);
+  }
+
+  console.log(`  Owner: ${owner} (you)`);
+  console.log(`  Animation: ${modeName}`);
+
+  const gasEstimate = await client.estimateContractGas({
+    address: COLOR_ANIMATION,
+    abi: colorAnimationAbi,
+    functionName: "setAnimation",
+    args: [BigInt(tokenId), mode],
+    account: account.address,
+  });
+
+  const gasPrice = await client.getGasPrice();
+  const estimatedCost = gasEstimate * gasPrice;
+  console.log(`\n  Estimated gas: ${gasEstimate} (~${formatEther(estimatedCost)} ETH @ ${formatGwei(gasPrice)} gwei)`);
+
+  const ok = await confirm(`\n  Set animation to "${modeName}"?`);
+  if (!ok) {
+    console.log("  Cancelled.\n");
+    return;
+  }
+
+  console.log("  Sending transaction...");
+  const txHash = await walletClient.writeContract({
+    address: COLOR_ANIMATION,
+    abi: colorAnimationAbi,
+    functionName: "setAnimation",
+    args: [BigInt(tokenId), mode],
+  });
+  console.log(`  Tx hash: ${txHash}`);
+  console.log("  Waiting for confirmation...");
+
+  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+  console.log(`  Status: ${receipt.status === "success" ? "confirmed" : "failed"}`);
+  console.log(`  Block:  ${receipt.blockNumber}`);
+  console.log(`  Gas:    ${receipt.gasUsed} (${formatEther(receipt.gasUsed * receipt.effectiveGasPrice)} ETH)`);
+  console.log("\nDone.\n");
+}
+
+// ---------------------------------------------------------------------------
 // History: past looks from ArtSelected events
 // ---------------------------------------------------------------------------
 
@@ -1349,6 +1431,7 @@ Usage:
                                                                         --transfers  Time Machine: survive 1–16 transfers (default 1)
                                                                         --date       Back to the Future: commemorative date
   node generate.mjs reset        <tokenId>                              Reset to default art on-chain (resetArt)
+  node generate.mjs animate      <tokenId> <mode 0-10>                  Set color animation on-chain
   node generate.mjs history      <tokenId> [--preview]                  Show past art from V1+V2 on-chain events
   node generate.mjs sweep        <tokenId> [--<Trait> <value>] [--concurrency N]
                                                                         Discover available colors for a trait combo
@@ -1364,6 +1447,7 @@ Examples:
   node generate.mjs apply 1702 0x000000c0e3d195d9f119c2f3e309bc645571b62d83002cda3b97d652dbf0dd28 --transfers 8
   node generate.mjs apply 1702 0x000000c0e3d195d9f119c2f3e309bc645571b62d83002cda3b97d652dbf0dd28 --date 2026-06-01
   node generate.mjs reset 1702
+  node generate.mjs animate 1702 1
   node generate.mjs history 1702 --preview
   node generate.mjs sweep 1702 --Background "Solid" --Pattern "Cross"
 
@@ -1500,6 +1584,21 @@ async function main() {
       process.exit(1);
     }
     await cmdReset(tokenId);
+    return;
+  }
+
+  if (command === "animate") {
+    const tokenId = args[1];
+    const mode = args[2];
+    if (!tokenId || mode === undefined) {
+      console.error("Error: usage: node generate.mjs animate <tokenId> <mode 0-10>");
+      console.error("\nModes:");
+      for (const [k, v] of Object.entries(ANIMATION_MODES)) {
+        console.error(`  ${k}: ${v}`);
+      }
+      process.exit(1);
+    }
+    await cmdSetAnimation(tokenId, Number(mode));
     return;
   }
 
